@@ -1,0 +1,22 @@
+# --- FastAPI 核心框架 ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# --- 数据库与 ORM ---
+sqlmodel>=0.0.22          # ORM层（基于 SQLAlchemy + Pydantic）
+pymysql>=1.1.0             # MySQL 驱动
+python-dotenv>=1.0.1       # 读取 .env 环境变量文件
+
+# --- 认证与安全 ---
+python-jose[cryptography]>=3.3.0   # JWT 加密解密
+passlib[bcrypt]>=1.7.4             # 密码哈希加密
+
+# --- 文件上传 ---
+python-multipart>=0.0.9            # 处理表单/文件上传请求
+
+# --- 可选：调试、格式化、美化日志（推荐安装） ---
+loguru>=0.7.2
+requests>=2.32.0
+
+# --- 可选：开发辅助（非必须） ---
+httpx>=0.27.0
