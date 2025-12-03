@@ -5,11 +5,10 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.db import init_db
-from app.routers import datasets_router
 
 
 # 路由模块
-from app.routers import health_router, auth_router
+from app.routers import health_router, auth_router, datasets_router, samples_router
 
 
 app = FastAPI(
@@ -29,3 +28,4 @@ def startup() -> None:
 app.include_router(health_router.router)
 app.include_router(auth_router.router)
 app.include_router(datasets_router.router)
+app.include_router(samples_router.router)

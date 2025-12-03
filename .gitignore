@@ -9,6 +9,9 @@ __pycache__/
 venv/
 env/
 
+# 配置文件（必须忽略，避免泄露密码）
+.env
+
 # 图片等数据文件
 *.png
 *.jpg
@@ -49,6 +52,10 @@ env/
 .DS_Store
 Thumbs.db
 
-# 数据目录
+# 训练/数据目录（避免上传大文件）
 data/
 datasets/
+
+# FastAPI 项目上传文件目录
+storage/
+uploads/
