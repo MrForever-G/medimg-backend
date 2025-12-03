@@ -1,0 +1,54 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 图片等数据文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.svg
+*.pdf
+
+# 文档与表格
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.docx
+*.doc
+*.pptx
+
+# 科学计算数据
+*.npy
+*.npz
+*.pt
+*.pth
+*.h5
+*.pickle
+*.pkl
+
+# 日志
+*.log
+
+# IDE 配置
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 数据目录
+data/
+datasets/
