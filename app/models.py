@@ -4,6 +4,7 @@ from typing import Optional
 
 from sqlmodel import SQLModel, Field, Column, Relationship
 from sqlalchemy import String, Text, Enum as SAEnum, Index
+from pydantic import BaseModel, ConfigDict
 
 
 # 枚举定义
@@ -155,3 +156,80 @@ class AuditLog(SQLModel, table=True):
 
 Index("ix_sample_dataset_sha", Sample.dataset_id, Sample.sha256, unique=True)
 Index("ix_approval_target", Approval.resource_type, Approval.resource_id)
+
+
+
+# 输出模型（用于接口返回）
+
+# 数据集输出模型
+class DatasetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    version: str | None
+    visibility: Visibility
+    created_by: int
+    created_at: datetime
+
+
+
+# 样本输出模型
+class SampleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    dataset_id: int
+    file_path: str
+    sha256: str
+    mime: str | None
+    created_by: int
+    created_at: datetime
+
+
+
+# 标注输出模型
+class AnnotationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sample_id: int
+    author_id: int
+    anno_type: AnnoType
+    payload_json: str
+    status: AnnoStatus
+    version: int
+    created_at: datetime
+
+
+# 审批输出模型
+class ApprovalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    applicant_id: int
+    resource_type: ResourceType
+    resource_id: int
+    purpose: str | None
+    decision: Decision
+    expires_at: datetime | None
+    reviewed_by: int | None
+    reviewed_at: datetime | None
+    created_at: datetime
+
+
+
+# 审计日志输出模型
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    actor_id: int | None
+    action: str
+    resource_type: str | None
+    resource_id: int | None
+    ip: str | None
+    result: AuditResult
+    detail: str | None
+    created_at: datetime
