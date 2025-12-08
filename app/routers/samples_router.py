@@ -60,21 +60,25 @@ async def upload_sample(
         raise HTTPException(409, "该文件已存在（SHA256重复）")
 
     # 保存路径
-    save_dir = os.path.join(settings.STORAGE_ROOT, f"dataset_{dataset_id}")
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = f"dataset_{dataset_id}"                      # 相对目录，不含根路径
+    abs_dir = os.path.join(settings.STORAGE_ROOT, save_dir)  # 绝对路径用于保存
+    os.makedirs(abs_dir, exist_ok=True)
 
-    save_path = os.path.join(save_dir, name)
-    with open(save_path, "wb") as f:
+    abs_path = os.path.join(abs_dir, name)  # 真实文件保存路径
+    with open(abs_path, "wb") as f:
         f.write(content)
 
-    # 写入数据库
+    relative_path = f"{save_dir}/{name}"  # 相对路径写入数据库
+
+    # 写入数据库（用相对路径）
     sample = Sample(
         dataset_id=dataset_id,
-        file_path=save_path,
+        file_path=relative_path,
         sha256=digest,
         mime=file.content_type,
         created_by=current.id,
     )
+
     db.add(sample)
     db.commit()
     db.refresh(sample)
@@ -126,3 +130,74 @@ def list_by_dataset(
     )
 
     return records
+
+from fastapi.responses import FileResponse
+from app.models import Approval, ResourceType, Decision
+from sqlalchemy.orm import Session
+from datetime import datetime
+
+# 下载样本文件（需审批通过）
+@router.get("/{sample_id}/download")
+def download_sample(
+    sample_id: int,
+    db: Session = Depends(get_session),
+    current=Depends(get_current_user),
+    request: Request = None,
+):
+    # 校验样本是否存在
+    sample = db.query(Sample).filter(Sample.id == sample_id).first()
+    if not sample:
+        # 数据不存在，记录日志
+        log_action(db, current.id, "download_sample", request, result="deny", detail="sample not found")
+        raise HTTPException(404, "样本不存在")
+
+    # 查询审批记录
+    approval = (
+        db.query(Approval)
+        .filter(
+            Approval.applicant_id == current.id,
+            Approval.resource_type == ResourceType.sample,
+            Approval.resource_id == sample_id,
+        )
+        .order_by(Approval.id.desc())  # 取最新一条
+        .first()
+    )
+
+    if not approval:
+        log_action(db, current.id, "download_sample", request, result="deny", detail="no approval")
+        raise HTTPException(403, "无下载权限（未申请审批）")
+
+    # 审批状态检查
+    if approval.decision != Decision.approved:
+        log_action(db, current.id, "download_sample", request, result="deny", detail="not approved")
+        raise HTTPException(403, "审批未通过")
+
+    # 过期时间检查
+    if approval.expires_at and approval.expires_at < datetime.utcnow():
+        log_action(db, current.id, "download_sample", request, result="deny", detail="approval expired")
+        raise HTTPException(403, "审批已过期")
+
+    # 全部校验通过，允许下载
+    abs_path = os.path.join(settings.STORAGE_ROOT, sample.file_path)
+    if not os.path.exists(abs_path):
+        # 文件缺失（一般不会出现）
+        log_action(db, current.id, "download_sample", request, result="error", detail="file not found")
+        raise HTTPException(500, "文件不存在")
+
+    # 成功下载行为写入日志
+    log_action(
+        db,
+        current.id,
+        "download_sample",
+        request,
+        resource_type="sample",
+        resource_id=sample_id,
+        result="ok",
+    )
+
+    # 返回真实文件
+    return FileResponse(
+        abs_path,
+        filename=os.path.basename(abs_path),
+        media_type=sample.mime or "application/octet-stream"
+    )

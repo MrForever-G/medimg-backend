@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from app.config import settings
 
 from app.db import get_session
 from app.models import Dataset, Visibility, User, UserRole, DatasetOut
@@ -104,3 +105,83 @@ def get_dataset(
     )
 
     return d
+
+import os
+import shutil
+import tempfile
+from fastapi.responses import FileResponse
+from app.models import Approval, ResourceType, Decision
+from datetime import datetime
+
+
+# 下载整个数据集（需审批通过）
+@router.get("/{dataset_id}/download")
+def download_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_session),
+    current: User = Depends(get_current_user),
+    request: Request = None,
+):
+    # 校验数据集是否存在
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        log_action(db, current.id, "download_dataset", request, result="deny", detail="dataset not found")
+        raise HTTPException(404, "数据集不存在")
+
+    # 校验审批
+    approval = (
+        db.query(Approval)
+        .filter(
+            Approval.applicant_id == current.id,
+            Approval.resource_type == ResourceType.dataset,
+            Approval.resource_id == dataset_id,
+        )
+        .order_by(Approval.id.desc())
+        .first()
+    )
+
+    if not approval:
+        log_action(db, current.id, "download_dataset", request, result="deny", detail="no approval")
+        raise HTTPException(403, "无下载权限（未申请审批）")
+
+    if approval.decision != Decision.approved:
+        log_action(db, current.id, "download_dataset", request, result="deny", detail="not approved")
+        raise HTTPException(403, "审批未通过")
+
+    if approval.expires_at and approval.expires_at < datetime.utcnow():
+        log_action(db, current.id, "download_dataset", request, result="deny", detail="approval expired")
+        raise HTTPException(403, "审批已过期")
+
+    # 数据集路径
+    folder = os.path.join(settings.STORAGE_ROOT, f"dataset_{dataset_id}")
+    if not os.path.exists(folder):
+        log_action(db, current.id, "download_dataset", request, result="error", detail="folder missing")
+        raise HTTPException(500, "数据集目录不存在")
+
+    # 创建临时 ZIP 包
+    tmp_dir = tempfile.mkdtemp()
+    zip_path = os.path.join(tmp_dir, f"dataset_{dataset_id}.zip")
+
+    shutil.make_archive(
+        base_name=zip_path.replace(".zip", ""),  # 去掉扩展名，make_archive 会自动加 .zip
+        format="zip",
+        root_dir=folder
+    )
+
+    # 日志记录
+    log_action(
+        db,
+        current.id,
+        "download_dataset",
+        request,
+        resource_type="dataset",
+        resource_id=dataset_id,
+        result="ok",
+    )
+
+    # 返回 ZIP 文件
+    return FileResponse(
+        zip_path,
+        filename=f"dataset_{dataset_id}.zip",
+        media_type="application/zip",
+    )
