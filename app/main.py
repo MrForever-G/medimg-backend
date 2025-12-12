@@ -2,6 +2,7 @@
 
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_db
@@ -10,12 +11,19 @@ from app.db import init_db
 # 路由模块
 from app.routers import health_router, auth_router, datasets_router, samples_router, annotations_router, approvals_router
 
-
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
 )
 
+# CORS 设置：允许前端访问后端 API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 开发环境允许所有
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 def startup() -> None:

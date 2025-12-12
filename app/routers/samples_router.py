@@ -73,6 +73,7 @@ async def upload_sample(
     # 写入数据库（用相对路径）
     sample = Sample(
         dataset_id=dataset_id,
+        filename=file.filename,  
         file_path=relative_path,
         sha256=digest,
         mime=file.content_type,
@@ -200,4 +201,38 @@ def download_sample(
         abs_path,
         filename=os.path.basename(abs_path),
         media_type=sample.mime or "application/octet-stream"
+    )
+
+@router.delete("/{sample_id}", status_code=204)
+def delete_sample(
+    sample_id: int,
+    db: Session = Depends(get_session),
+    current=Depends(get_current_user),
+    request: Request = None,
+):
+    sample = db.query(Sample).filter(Sample.id == sample_id).first()
+    if not sample:
+        raise HTTPException(404, "样本不存在")
+
+    # 权限判断
+    if sample.created_by != current.id and current.role not in ["admin", "data_admin"]:
+        log_action(db, current.id, "delete_sample", request, result="deny")
+        raise HTTPException(403, "无权删除该样本")
+
+    # 删除磁盘文件
+    abs_path = os.path.join(settings.STORAGE_ROOT, sample.file_path)
+    if os.path.exists(abs_path):
+        os.remove(abs_path)
+
+    db.delete(sample)
+    db.commit()
+
+    log_action(
+        db,
+        current.id,
+        "delete_sample",
+        request,
+        resource_type="sample",
+        resource_id=sample_id,
+        result="ok",
     )

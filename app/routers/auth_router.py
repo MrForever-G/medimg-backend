@@ -38,6 +38,11 @@ class MeOut(BaseModel):
     role: UserRole
 
 
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
 # 注册
 @router.post("/register", response_model=RegisterOut, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterIn, db: Session = Depends(get_session), request: Request = None):
@@ -71,24 +76,16 @@ def register(body: RegisterIn, db: Session = Depends(get_session), request: Requ
 
 # 登录
 @router.post("/login", response_model=TokenOut)
-def login(
-    form: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_session),
-    request: Request = None
-):
-    """
-    OAuth2 密码流登录（表单入参）：
-      - username/password 通过表单提交
-      - 成功则签发 JWT（sub=username, role=role.value）
-    """
-    user = db.query(User).filter(User.username == form.username).first()
+def login(body: LoginIn, db: Session = Depends(get_session), request: Request = None):
+    user = db.query(User).filter(User.username == body.username).first()
 
-    if not user or not verify_password(form.password, user.hashed_password):
+    if not user or not verify_password(body.password, user.hashed_password):
         log_action(db, None, "login", request, result="deny", detail="wrong credentials")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     token = create_access_token({"sub": user.username, "role": user.role.value})
     log_action(db, user.id, "login", request, result="ok")
+
     return TokenOut(access_token=token)
 
 

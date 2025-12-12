@@ -185,3 +185,41 @@ def download_dataset(
         filename=f"dataset_{dataset_id}.zip",
         media_type="application/zip",
     )
+
+import shutil
+import os
+
+@router.delete("/{dataset_id}", status_code=204)
+def delete_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_session),
+    current=Depends(get_current_user),
+    request: Request = None,
+):
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not dataset:
+        raise HTTPException(404, "数据集不存在")
+
+    # 权限判断
+    if dataset.created_by != current.id and current.role not in ["admin", "data_admin"]:
+        log_action(db, current.id, "delete_dataset", request, result="deny")
+        raise HTTPException(403, "无权删除该数据集")
+
+    # 删除磁盘文件
+    dataset_dir = os.path.join(settings.STORAGE_ROOT, f"dataset_{dataset_id}")
+    if os.path.exists(dataset_dir):
+        shutil.rmtree(dataset_dir)
+
+    # 删除数据库记录（会级联 sample）
+    db.delete(dataset)
+    db.commit()
+
+    log_action(
+        db,
+        current.id,
+        "delete_dataset",
+        request,
+        resource_type="dataset",
+        resource_id=dataset_id,
+        result="ok",
+    )

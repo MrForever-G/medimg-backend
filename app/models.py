@@ -90,6 +90,7 @@ class Sample(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     dataset_id: int = Field(foreign_key="dataset.id", nullable=False, index=True)
+    filename: str = Field(sa_column=Column(String(255), nullable=False))
     file_path: str = Field(sa_column=Column(String(512), nullable=False))
     sha256: str = Field(sa_column=Column(String(64), nullable=False, unique=True, index=True))
     mime: Optional[str] = Field(default=None, sa_column=Column(String(64)))
@@ -181,6 +182,7 @@ class SampleOut(BaseModel):
 
     id: int
     dataset_id: int
+    filename: str 
     file_path: str
     sha256: str
     mime: str | None
