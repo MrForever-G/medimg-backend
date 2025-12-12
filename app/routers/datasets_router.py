@@ -193,24 +193,24 @@ import os
 def delete_dataset(
     dataset_id: int,
     db: Session = Depends(get_session),
-    current=Depends(get_current_user),
+    current: User = Depends(get_current_user),
     request: Request = None,
 ):
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         raise HTTPException(404, "数据集不存在")
 
-    # 权限判断
+    # 权限控制
     if dataset.created_by != current.id and current.role not in ["admin", "data_admin"]:
         log_action(db, current.id, "delete_dataset", request, result="deny")
         raise HTTPException(403, "无权删除该数据集")
 
-    # 删除磁盘文件
+    # 删除磁盘上的数据集目录（数据库级联不处理文件系统）
     dataset_dir = os.path.join(settings.STORAGE_ROOT, f"dataset_{dataset_id}")
     if os.path.exists(dataset_dir):
         shutil.rmtree(dataset_dir)
 
-    # 删除数据库记录（会级联 sample）
+    # 删除 Dataset 记录，Sample 由数据库外键 ON DELETE CASCADE 自动删除
     db.delete(dataset)
     db.commit()
 

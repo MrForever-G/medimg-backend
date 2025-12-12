@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Optional
 
 from sqlmodel import SQLModel, Field, Column, Relationship
-from sqlalchemy import String, Text, Enum as SAEnum, Index
+from sqlalchemy import String, Text, Enum as SAEnum, Index, ForeignKey
+from sqlalchemy.types import Integer
 from pydantic import BaseModel, ConfigDict
 
 
@@ -80,7 +81,15 @@ class Dataset(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
     creator: "User" = Relationship(back_populates="datasets")
-    samples: list["Sample"] = Relationship(back_populates="dataset")
+
+    # ORM 级联仅用于会话内一致性，实际删除行为由数据库外键 ON DELETE CASCADE 保证
+    samples: list["Sample"] = Relationship(
+        back_populates="dataset",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "passive_deletes": True,
+        },
+    )
 
 
 # 样本文件表
@@ -89,7 +98,17 @@ class Sample(SQLModel, table=True):
     __tablename__ = "sample"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    dataset_id: int = Field(foreign_key="dataset.id", nullable=False, index=True)
+
+    # 外键级联删除必须通过 sa_column 显式声明，避免 SQLModel foreign_key 与 sa_column 冲突
+    dataset_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("dataset.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+
     filename: str = Field(sa_column=Column(String(255), nullable=False))
     file_path: str = Field(sa_column=Column(String(512), nullable=False))
     sha256: str = Field(sa_column=Column(String(64), nullable=False, unique=True, index=True))
@@ -159,10 +178,8 @@ Index("ix_sample_dataset_sha", Sample.dataset_id, Sample.sha256, unique=True)
 Index("ix_approval_target", Approval.resource_type, Approval.resource_id)
 
 
-
 # 输出模型（用于接口返回）
 
-# 数据集输出模型
 class DatasetOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -175,14 +192,12 @@ class DatasetOut(BaseModel):
     created_at: datetime
 
 
-
-# 样本输出模型
 class SampleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     dataset_id: int
-    filename: str 
+    filename: str
     file_path: str
     sha256: str
     mime: str | None
@@ -190,8 +205,6 @@ class SampleOut(BaseModel):
     created_at: datetime
 
 
-
-# 标注输出模型
 class AnnotationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -205,7 +218,6 @@ class AnnotationOut(BaseModel):
     created_at: datetime
 
 
-# 审批输出模型
 class ApprovalOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -221,8 +233,6 @@ class ApprovalOut(BaseModel):
     created_at: datetime
 
 
-
-# 审计日志输出模型
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
