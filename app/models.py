@@ -118,7 +118,12 @@ class Sample(SQLModel, table=True):
 
     dataset: "Dataset" = Relationship(back_populates="samples")
     creator: "User" = Relationship(back_populates="samples")
-    annotations: list["Annotation"] = Relationship(back_populates="sample")
+    annotations: list["Annotation"] = Relationship(
+        back_populates="sample",
+        sa_relationship_kwargs={
+            "passive_deletes": True
+        }
+    )
 
 
 # 标注表
