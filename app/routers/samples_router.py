@@ -236,3 +236,77 @@ def delete_sample(
         resource_id=sample_id,
         result="ok",
     )
+
+# 允许列出所有样本（管理员权限）
+@router.get("/", response_model=list[SampleOut])
+def list_all_samples(
+    db: Session = Depends(get_session),
+    current=Depends(get_current_user),
+    request: Request = None,
+):
+    """
+    List samples visible to the current user.
+
+    - Administrators and data administrators can view all samples.
+    - Regular users can only view samples created by themselves.
+    """
+
+    query = db.query(Sample)
+
+    # 权限控制：仅管理员可查看全部样本
+    if current.role not in ["admin", "data_admin"]:
+        query = query.filter(Sample.created_by == current.id)
+
+    records = query.order_by(Sample.id.desc()).all()
+
+    log_action(
+        db,
+        current.id,
+        "list_all_samples",
+        request,
+        resource_type="sample",
+        result="ok",
+    )
+
+    return records
+
+# 获取样本详情
+@router.get("/{sample_id}", response_model=SampleOut)
+def get_sample_detail(
+    sample_id: int,
+    db: Session = Depends(get_session),
+    current=Depends(get_current_user),
+    request: Request = None,
+):
+    sample = db.query(Sample).filter(Sample.id == sample_id).first()
+    if not sample:
+        log_action(db, current.id, "get_sample", request, result="deny", detail="sample not found")
+        raise HTTPException(404, "样本不存在")
+
+    # 显式查询所属数据集，用于权限判断（避免隐式 relationship 风险）
+    dataset = db.query(Dataset).filter(Dataset.id == sample.dataset_id).first()
+    if not dataset:
+        log_action(db, current.id, "get_sample", request, result="deny", detail="dataset not found")
+        raise HTTPException(404, "所属数据集不存在")
+
+    # 访问控制策略：
+    # - 管理员 / 数据管理员：可访问所有样本
+    # - 普通用户：只能访问
+    #   1) 自己创建的样本
+    #   2) 或所属数据集为 group 可见
+    if current.role not in ["admin", "data_admin"]:
+        if sample.created_by != current.id and dataset.visibility == Visibility.private:
+            log_action(db, current.id, "get_sample", request, result="deny", detail="no permission")
+            raise HTTPException(403, "无权访问该样本")
+
+    log_action(
+        db,
+        current.id,
+        "get_sample",
+        request,
+        resource_type="sample",
+        resource_id=sample_id,
+        result="ok",
+    )
+
+    return sample
