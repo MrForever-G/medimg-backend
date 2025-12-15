@@ -1,4 +1,5 @@
-本项目为 软件工程课程设计 医学图像管理系统
+本项目为 软件工程课程设计 医学图像管理系统 后端设计
+前端设计可访问： https://github.com/MrForever-G/medimg-frontend
 版权归本人所有
 ## License and Usage
 

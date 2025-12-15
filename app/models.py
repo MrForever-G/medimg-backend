@@ -64,7 +64,15 @@ class User(SQLModel, table=True):
 
     datasets: list["Dataset"] = Relationship(back_populates="creator")
     samples: list["Sample"] = Relationship(back_populates="creator")
-    annotations: list["Annotation"] = Relationship(back_populates="author")
+
+    # 关键：这是“作为作者”的标注
+    authored_annotations: list["Annotation"] = Relationship(
+        back_populates="author",
+        sa_relationship_kwargs={
+            "foreign_keys": "[Annotation.author_id]"
+        },
+    )
+
 
 
 # 数据集表
@@ -132,16 +140,37 @@ class Annotation(SQLModel, table=True):
     __tablename__ = "annotation"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+
     sample_id: int = Field(foreign_key="sample.id", nullable=False, index=True)
+
     author_id: int = Field(foreign_key="user.id", nullable=False, index=True)
+    reviewed_by: Optional[int] = Field(default=None, foreign_key="user.id")
+
     anno_type: AnnoType = Field(sa_column=Column(SAEnum(AnnoType), nullable=False))
     payload_json: str = Field(sa_column=Column(Text, nullable=False))
     status: AnnoStatus = Field(sa_column=Column(SAEnum(AnnoStatus), nullable=False))
     version: int = Field(default=1, nullable=False)
+
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    reviewed_at: Optional[datetime] = Field(default=None)
+
+    # 关键：明确 author 关系
+    author: "User" = Relationship(
+        back_populates="authored_annotations",
+        sa_relationship_kwargs={
+            "foreign_keys": "[Annotation.author_id]"
+        },
+    )
+
+    # 可选：明确 reviewer 关系
+    reviewer: "User" = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[Annotation.reviewed_by]"
+        }
+    )
 
     sample: "Sample" = Relationship(back_populates="annotations")
-    author: "User" = Relationship(back_populates="annotations")
+
 
 
 # 下载授权表
@@ -216,11 +245,15 @@ class AnnotationOut(BaseModel):
     id: int
     sample_id: int
     author_id: int
+
     anno_type: AnnoType
     payload_json: str
     status: AnnoStatus
     version: int
+
     created_at: datetime
+    reviewed_by: int | None
+    reviewed_at: datetime | None
 
 
 class ApprovalOut(BaseModel):
