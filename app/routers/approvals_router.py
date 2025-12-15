@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 from datetime import datetime, timedelta
 
+from app.utils.time import utc_now
 from app.db import get_session
 from app.models import Approval, User, UserRole, ResourceType, Decision, ApprovalOut
 from app.deps import get_current_user, require_role
@@ -27,7 +28,7 @@ def request_approval(
         resource_id=resource_id,
         purpose=purpose,
         decision=Decision.pending,
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
 
     db.add(req)
@@ -75,11 +76,11 @@ def review_approval(
     # 设置审核信息
     approval.decision = decision
     approval.reviewed_by = current.id
-    approval.reviewed_at = datetime.utcnow()
+    approval.reviewed_at = utc_now()
 
     # 若审核通过，设置过期时间
     if decision == Decision.approved and ttl_minutes:
-        approval.expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+        approval.expires_at = utc_now() + timedelta(minutes=ttl_minutes)
 
     db.add(approval)
     db.commit()
@@ -129,3 +130,4 @@ def get_my_approval(
     # 若从未申请过，返回 None
     approval = db.execute(stmt).scalars().first()
     return approval
+

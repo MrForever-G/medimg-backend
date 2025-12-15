@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import Request
 from sqlalchemy.orm import Session
 from app.models import AuditLog
-
+from app.utils.time import utc_now
 
 def get_client_ip(request: Optional[Request]) -> Optional[str]:
     if request is None:
@@ -36,7 +36,7 @@ def log_action(
         ip=ip,
         result=result,
         detail=detail,
-        created_at=datetime.utcnow(),
+        created_at = utc_now(),
     )
 
     db.add(log)

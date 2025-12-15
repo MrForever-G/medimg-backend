@@ -3,9 +3,11 @@ from datetime import datetime
 from typing import Optional
 
 from sqlmodel import SQLModel, Field, Column, Relationship
-from sqlalchemy import String, Text, Enum as SAEnum, Index, ForeignKey
+from sqlalchemy import String, Text, Enum as SAEnum, Index, ForeignKey, DateTime
 from sqlalchemy.types import Integer
 from pydantic import BaseModel, ConfigDict
+
+from app.utils.time import utc_now
 
 
 # 枚举定义
@@ -60,7 +62,10 @@ class User(SQLModel, table=True):
     username: str = Field(sa_column=Column(String(64), unique=True, nullable=False, index=True))
     hashed_password: str = Field(sa_column=Column(String(255), nullable=False))
     role: UserRole = Field(sa_column=Column(SAEnum(UserRole), nullable=False))
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
 
     datasets: list["Dataset"] = Relationship(back_populates="creator")
     samples: list["Sample"] = Relationship(back_populates="creator")
@@ -71,7 +76,6 @@ class User(SQLModel, table=True):
             "foreign_keys": "[Annotation.author_id]"
         },
     )
-
 
 
 # 数据集表
@@ -85,11 +89,13 @@ class Dataset(SQLModel, table=True):
     version: Optional[str] = Field(default=None, sa_column=Column(String(32)))
     visibility: Visibility = Field(sa_column=Column(SAEnum(Visibility), nullable=False))
     created_by: int = Field(foreign_key="user.id", nullable=False, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
 
     creator: "User" = Relationship(back_populates="datasets")
 
-    # ORM 级联仅用于会话内一致性，实际删除行为由数据库外键 ON DELETE CASCADE 保证
     samples: list["Sample"] = Relationship(
         back_populates="dataset",
         sa_relationship_kwargs={
@@ -106,7 +112,6 @@ class Sample(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    # 外键级联删除必须通过 sa_column 显式声明，避免 SQLModel foreign_key 与 sa_column 冲突
     dataset_id: int = Field(
         sa_column=Column(
             Integer,
@@ -121,7 +126,10 @@ class Sample(SQLModel, table=True):
     sha256: str = Field(sa_column=Column(String(64), nullable=False, unique=True, index=True))
     mime: Optional[str] = Field(default=None, sa_column=Column(String(64)))
     created_by: int = Field(foreign_key="user.id", nullable=False, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
 
     dataset: "Dataset" = Relationship(back_populates="samples")
     creator: "User" = Relationship(back_populates="samples")
@@ -150,10 +158,15 @@ class Annotation(SQLModel, table=True):
     status: AnnoStatus = Field(sa_column=Column(SAEnum(AnnoStatus), nullable=False))
     version: int = Field(default=1, nullable=False)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    reviewed_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    reviewed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True))
+    )
 
-    # 关键：明确 author 关系
     author: "User" = Relationship(
         back_populates="authored_annotations",
         sa_relationship_kwargs={
@@ -161,7 +174,6 @@ class Annotation(SQLModel, table=True):
         },
     )
 
-    # 可选：明确 reviewer 关系
     reviewer: "User" = Relationship(
         sa_relationship_kwargs={
             "foreign_keys": "[Annotation.reviewed_by]"
@@ -169,7 +181,6 @@ class Annotation(SQLModel, table=True):
     )
 
     sample: "Sample" = Relationship(back_populates="annotations")
-
 
 
 # 下载授权表
@@ -183,10 +194,19 @@ class Approval(SQLModel, table=True):
     resource_id: int = Field(nullable=False, index=True)
     purpose: Optional[str] = Field(default=None, sa_column=Column(Text))
     decision: Decision = Field(sa_column=Column(SAEnum(Decision), nullable=False))
-    expires_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True))
+    )
     reviewed_by: Optional[int] = Field(default=None, foreign_key="user.id")
-    reviewed_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    reviewed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True))
+    )
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
 
 
 # 审计日志表
@@ -202,7 +222,10 @@ class AuditLog(SQLModel, table=True):
     ip: Optional[str] = Field(default=None, sa_column=Column(String(45)))
     result: AuditResult = Field(sa_column=Column(SAEnum(AuditResult), nullable=False))
     detail: Optional[str] = Field(default=None, sa_column=Column(Text))
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
 
 
 # 索引

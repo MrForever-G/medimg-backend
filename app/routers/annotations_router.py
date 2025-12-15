@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.utils.time import utc_now
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -52,7 +53,7 @@ def create_annotation(
         payload_json=body.payload_json,
         status=AnnoStatus.submitted,
         version=next_version,
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
 
     db.add(anno)
@@ -139,7 +140,7 @@ def approve_annotation(
         raise HTTPException(status_code=400, detail="当前标注状态不可审批")
 
     anno.status = AnnoStatus.approved
-    anno.reviewed_at = datetime.utcnow()
+    anno.reviewed_at = utc_now()
     anno.reviewed_by = current.id
 
     db.commit()
@@ -187,7 +188,7 @@ def reject_annotation(
         raise HTTPException(status_code=400, detail="当前标注状态不可驳回")
 
     anno.status = AnnoStatus.rejected
-    anno.reviewed_at = datetime.utcnow()
+    anno.reviewed_at = utc_now()
     anno.reviewed_by = current.id
 
     db.commit()

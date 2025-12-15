@@ -2,12 +2,28 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.config import settings
 
+from app.utils.time import utc_now
 from app.db import get_session
 from app.models import Dataset, Visibility, User, UserRole, DatasetOut
 from app.deps import get_current_user
 from app.audit import log_action
 
+from datetime import timezone
+import os
+import shutil
+import tempfile
+from fastapi.responses import FileResponse
+from app.models import Approval, ResourceType, Decision
+
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+
+def ensure_utc(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 # 创建数据集
@@ -20,7 +36,6 @@ def create_dataset(
 ):
     name = body.get("name")
     if not name:
-        # 数据集名称缺失，记录日志
         log_action(db, current.id, "create_dataset", request, result="deny", detail="missing name")
         raise HTTPException(400, "缺少数据集名称")
 
@@ -36,7 +51,6 @@ def create_dataset(
     db.commit()
     db.refresh(dataset)
 
-    # 成功创建数据集，记录日志
     log_action(
         db,
         current.id,
@@ -47,7 +61,6 @@ def create_dataset(
         result="ok",
     )
 
-    # 返回 ORM 实体，由 Pydantic 自动序列化
     return dataset
 
 
@@ -59,17 +72,13 @@ def list_datasets(
 ):
     query = db.query(Dataset)
 
-    # 研究员能看到 group 或自己创建的 private
     if current.role == UserRole.researcher:
         query = query.filter(
             (Dataset.visibility == Visibility.group)
             | (Dataset.created_by == current.id)
         )
 
-    datasets = query.all()
-
-    # 返回 ORM 列表
-    return datasets
+    return query.all()
 
 
 # 获取数据集详情
@@ -82,18 +91,14 @@ def get_dataset(
 ):
     d = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not d:
-        # 数据集不存在，记录日志
         log_action(db, current.id, "get_dataset", request, result="deny", detail="not found")
         raise HTTPException(404, "数据集不存在")
 
-    # 私有数据集权限校验
     if current.role == UserRole.researcher:
         if d.visibility == Visibility.private and d.created_by != current.id:
-            # 无权限访问该数据集，记录日志
             log_action(db, current.id, "get_dataset", request, result="deny", detail="no permission")
             raise HTTPException(403, "无权访问该数据集")
 
-    # 成功获取数据集详情，记录日志
     log_action(
         db,
         current.id,
@@ -106,13 +111,6 @@ def get_dataset(
 
     return d
 
-import os
-import shutil
-import tempfile
-from fastapi.responses import FileResponse
-from app.models import Approval, ResourceType, Decision
-from datetime import datetime
-
 
 # 下载整个数据集（需审批通过）
 @router.get("/{dataset_id}/download")
@@ -122,13 +120,11 @@ def download_dataset(
     current: User = Depends(get_current_user),
     request: Request = None,
 ):
-    # 校验数据集是否存在
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
         log_action(db, current.id, "download_dataset", request, result="deny", detail="dataset not found")
         raise HTTPException(404, "数据集不存在")
 
-    # 校验审批
     approval = (
         db.query(Approval)
         .filter(
@@ -148,27 +144,25 @@ def download_dataset(
         log_action(db, current.id, "download_dataset", request, result="deny", detail="not approved")
         raise HTTPException(403, "审批未通过")
 
-    if approval.expires_at and approval.expires_at < datetime.utcnow():
+    expires_at = ensure_utc(approval.expires_at)
+    if expires_at and expires_at < utc_now():
         log_action(db, current.id, "download_dataset", request, result="deny", detail="approval expired")
         raise HTTPException(403, "审批已过期")
 
-    # 数据集路径
     folder = os.path.join(settings.STORAGE_ROOT, f"dataset_{dataset_id}")
     if not os.path.exists(folder):
         log_action(db, current.id, "download_dataset", request, result="error", detail="folder missing")
         raise HTTPException(500, "数据集目录不存在")
 
-    # 创建临时 ZIP 包
     tmp_dir = tempfile.mkdtemp()
     zip_path = os.path.join(tmp_dir, f"dataset_{dataset_id}.zip")
 
     shutil.make_archive(
-        base_name=zip_path.replace(".zip", ""),  # 去掉扩展名，make_archive 会自动加 .zip
+        base_name=zip_path.replace(".zip", ""),
         format="zip",
         root_dir=folder
     )
 
-    # 日志记录
     log_action(
         db,
         current.id,
@@ -179,15 +173,12 @@ def download_dataset(
         result="ok",
     )
 
-    # 返回 ZIP 文件
     return FileResponse(
         zip_path,
         filename=f"dataset_{dataset_id}.zip",
         media_type="application/zip",
     )
 
-import shutil
-import os
 
 @router.delete("/{dataset_id}", status_code=204)
 def delete_dataset(
@@ -200,17 +191,14 @@ def delete_dataset(
     if not dataset:
         raise HTTPException(404, "数据集不存在")
 
-    # 权限控制
     if dataset.created_by != current.id and current.role not in ["admin", "data_admin"]:
         log_action(db, current.id, "delete_dataset", request, result="deny")
         raise HTTPException(403, "无权删除该数据集")
 
-    # 删除磁盘上的数据集目录（数据库级联不处理文件系统）
     dataset_dir = os.path.join(settings.STORAGE_ROOT, f"dataset_{dataset_id}")
     if os.path.exists(dataset_dir):
         shutil.rmtree(dataset_dir)
 
-    # 删除 Dataset 记录，Sample 由数据库外键 ON DELETE CASCADE 自动删除
     db.delete(dataset)
     db.commit()
 

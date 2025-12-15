@@ -1,28 +1,36 @@
 import os
 import hashlib
 from typing import List
+from datetime import timezone
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Request
 from sqlalchemy.orm import Session
+from fastapi.responses import FileResponse
 
 from app.db import get_session
-from app.models import Sample, Dataset, SampleOut
+from app.models import Sample, Dataset, SampleOut, Approval, ResourceType, Decision, Visibility
 from app.deps import get_current_user
 from app.config import settings
 from app.audit import log_action
-
+from app.utils.time import utc_now
 
 router = APIRouter(prefix="/samples", tags=["samples"])
 
-# 允许上传的扩展名
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
 
 def sha256_of_bytes(data: bytes) -> str:
-    # 计算SHA256
     h = hashlib.sha256()
     h.update(data)
     return h.hexdigest()
+
+
+def ensure_utc(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 @router.post("/upload/{dataset_id}", status_code=status.HTTP_201_CREATED, response_model=SampleOut)
@@ -33,47 +41,38 @@ async def upload_sample(
     current=Depends(get_current_user),
     request: Request = None,
 ):
-    # 校验扩展名
     name = file.filename
     _, ext = os.path.splitext(name.lower())
     if ext not in ALLOWED_EXT:
-        # 文件扩展名不允许，记录日志
         log_action(db, current.id, "upload_sample", request, result="deny", detail=f"invalid ext: {ext}")
         raise HTTPException(400, f"文件类型不允许: {ext}")
 
-    # 校验数据集存在
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
-        # 目标数据集不存在，记录日志
         log_action(db, current.id, "upload_sample", request, result="deny", detail="dataset not found")
         raise HTTPException(404, "数据集不存在")
 
-    # 读取文件内容
     content = await file.read()
     digest = sha256_of_bytes(content)
 
-    # 判断 SHA256 是否重复
     exists = db.query(Sample).filter(Sample.sha256 == digest).first()
     if exists:
-        # SHA256 冲突，记录日志
         log_action(db, current.id, "upload_sample", request, result="deny", detail="sha256 duplicate")
         raise HTTPException(409, "该文件已存在（SHA256重复）")
 
-    # 保存路径
-    save_dir = f"dataset_{dataset_id}"                      # 相对目录，不含根路径
-    abs_dir = os.path.join(settings.STORAGE_ROOT, save_dir)  # 绝对路径用于保存
+    save_dir = f"dataset_{dataset_id}"
+    abs_dir = os.path.join(settings.STORAGE_ROOT, save_dir)
     os.makedirs(abs_dir, exist_ok=True)
 
-    abs_path = os.path.join(abs_dir, name)  # 真实文件保存路径
+    abs_path = os.path.join(abs_dir, name)
     with open(abs_path, "wb") as f:
         f.write(content)
 
-    relative_path = f"{save_dir}/{name}"  # 相对路径写入数据库
+    relative_path = f"{save_dir}/{name}"
 
-    # 写入数据库（用相对路径）
     sample = Sample(
         dataset_id=dataset_id,
-        filename=file.filename,  
+        filename=file.filename,
         file_path=relative_path,
         sha256=digest,
         mime=file.content_type,
@@ -84,7 +83,6 @@ async def upload_sample(
     db.commit()
     db.refresh(sample)
 
-    # 成功上传样本，记录日志
     log_action(
         db,
         current.id,
@@ -105,10 +103,8 @@ def list_by_dataset(
     current=Depends(get_current_user),
     request: Request = None,
 ):
-    # 校验数据集存在
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not dataset:
-        # 数据集不存在，记录日志
         log_action(db, current.id, "list_sample", request, result="deny", detail="dataset not found")
         raise HTTPException(404, "数据集不存在")
 
@@ -119,7 +115,6 @@ def list_by_dataset(
         .all()
     )
 
-    # 成功列出样本，记录日志
     log_action(
         db,
         current.id,
@@ -132,12 +127,7 @@ def list_by_dataset(
 
     return records
 
-from fastapi.responses import FileResponse
-from app.models import Approval, ResourceType, Decision
-from sqlalchemy.orm import Session
-from datetime import datetime
 
-# 下载样本文件（需审批通过）
 @router.get("/{sample_id}/download")
 def download_sample(
     sample_id: int,
@@ -145,14 +135,11 @@ def download_sample(
     current=Depends(get_current_user),
     request: Request = None,
 ):
-    # 校验样本是否存在
     sample = db.query(Sample).filter(Sample.id == sample_id).first()
     if not sample:
-        # 数据不存在，记录日志
         log_action(db, current.id, "download_sample", request, result="deny", detail="sample not found")
         raise HTTPException(404, "样本不存在")
 
-    # 查询审批记录
     approval = (
         db.query(Approval)
         .filter(
@@ -160,7 +147,7 @@ def download_sample(
             Approval.resource_type == ResourceType.sample,
             Approval.resource_id == sample_id,
         )
-        .order_by(Approval.id.desc())  # 取最新一条
+        .order_by(Approval.id.desc())
         .first()
     )
 
@@ -168,24 +155,20 @@ def download_sample(
         log_action(db, current.id, "download_sample", request, result="deny", detail="no approval")
         raise HTTPException(403, "无下载权限（未申请审批）")
 
-    # 审批状态检查
     if approval.decision != Decision.approved:
         log_action(db, current.id, "download_sample", request, result="deny", detail="not approved")
         raise HTTPException(403, "审批未通过")
 
-    # 过期时间检查
-    if approval.expires_at and approval.expires_at < datetime.utcnow():
+    expires_at = ensure_utc(approval.expires_at)
+    if expires_at and expires_at < utc_now():
         log_action(db, current.id, "download_sample", request, result="deny", detail="approval expired")
         raise HTTPException(403, "审批已过期")
 
-    # 全部校验通过，允许下载
     abs_path = os.path.join(settings.STORAGE_ROOT, sample.file_path)
     if not os.path.exists(abs_path):
-        # 文件缺失（一般不会出现）
         log_action(db, current.id, "download_sample", request, result="error", detail="file not found")
         raise HTTPException(500, "文件不存在")
 
-    # 成功下载行为写入日志
     log_action(
         db,
         current.id,
@@ -196,12 +179,12 @@ def download_sample(
         result="ok",
     )
 
-    # 返回真实文件
     return FileResponse(
         abs_path,
         filename=os.path.basename(abs_path),
         media_type=sample.mime or "application/octet-stream"
     )
+
 
 @router.delete("/{sample_id}", status_code=204)
 def delete_sample(
@@ -214,12 +197,10 @@ def delete_sample(
     if not sample:
         raise HTTPException(404, "样本不存在")
 
-    # 权限判断
     if sample.created_by != current.id and current.role not in ["admin", "data_admin"]:
         log_action(db, current.id, "delete_sample", request, result="deny")
         raise HTTPException(403, "无权删除该样本")
 
-    # 删除磁盘文件
     abs_path = os.path.join(settings.STORAGE_ROOT, sample.file_path)
     if os.path.exists(abs_path):
         os.remove(abs_path)
@@ -237,23 +218,15 @@ def delete_sample(
         result="ok",
     )
 
-# 允许列出所有样本（管理员权限）
+
 @router.get("/", response_model=list[SampleOut])
 def list_all_samples(
     db: Session = Depends(get_session),
     current=Depends(get_current_user),
     request: Request = None,
 ):
-    """
-    List samples visible to the current user.
-
-    - Administrators and data administrators can view all samples.
-    - Regular users can only view samples created by themselves.
-    """
-
     query = db.query(Sample)
 
-    # 权限控制：仅管理员可查看全部样本
     if current.role not in ["admin", "data_admin"]:
         query = query.filter(Sample.created_by == current.id)
 
@@ -270,7 +243,7 @@ def list_all_samples(
 
     return records
 
-# 获取样本详情
+
 @router.get("/{sample_id}", response_model=SampleOut)
 def get_sample_detail(
     sample_id: int,
@@ -283,17 +256,11 @@ def get_sample_detail(
         log_action(db, current.id, "get_sample", request, result="deny", detail="sample not found")
         raise HTTPException(404, "样本不存在")
 
-    # 显式查询所属数据集，用于权限判断（避免隐式 relationship 风险）
     dataset = db.query(Dataset).filter(Dataset.id == sample.dataset_id).first()
     if not dataset:
         log_action(db, current.id, "get_sample", request, result="deny", detail="dataset not found")
         raise HTTPException(404, "所属数据集不存在")
 
-    # 访问控制策略：
-    # - 管理员 / 数据管理员：可访问所有样本
-    # - 普通用户：只能访问
-    #   1) 自己创建的样本
-    #   2) 或所属数据集为 group 可见
     if current.role not in ["admin", "data_admin"]:
         if sample.created_by != current.id and dataset.visibility == Visibility.private:
             log_action(db, current.id, "get_sample", request, result="deny", detail="no permission")
