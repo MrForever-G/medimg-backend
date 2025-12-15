@@ -97,3 +97,35 @@ def review_approval(
     )
 
     return approval
+
+# 列出所有审批请求
+@router.get("/", response_model=list[ApprovalOut])
+def list_approvals(
+    db: Session = Depends(get_session),
+    current: User = Depends(require_role(UserRole.admin, UserRole.data_admin)),
+):
+    stmt = select(Approval).order_by(Approval.created_at.desc())
+    return db.execute(stmt).scalars().all()
+
+# 当前用户查询自己某个资源的最新审批状态
+@router.get("/my", response_model=ApprovalOut | None)
+def get_my_approval(
+    resource_type: ResourceType,
+    resource_id: int,
+    db: Session = Depends(get_session),
+    current: User = Depends(get_current_user),
+):
+    stmt = (
+        select(Approval)
+        .where(
+            Approval.applicant_id == current.id,
+            Approval.resource_type == resource_type,
+            Approval.resource_id == resource_id,
+        )
+        .order_by(Approval.created_at.desc())
+        .limit(1)
+    )
+
+    # 若从未申请过，返回 None
+    approval = db.execute(stmt).scalars().first()
+    return approval

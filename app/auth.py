@@ -25,7 +25,7 @@ def create_access_token(payload: Dict[str, Any], expires_minutes: Optional[int] 
       - role: 可选，给前端展示；服务端权限仍以数据库为准
       - iat/exp: 签发/过期
     """
-    now = datetime.utcnow()
+    now = created_at = utc_now()()
     expire = now + timedelta(minutes=expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {**payload, "iat": now, "exp": expire}
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALG)

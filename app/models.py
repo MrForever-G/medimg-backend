@@ -65,7 +65,6 @@ class User(SQLModel, table=True):
     datasets: list["Dataset"] = Relationship(back_populates="creator")
     samples: list["Sample"] = Relationship(back_populates="creator")
 
-    # 关键：这是“作为作者”的标注
     authored_annotations: list["Annotation"] = Relationship(
         back_populates="author",
         sa_relationship_kwargs={
