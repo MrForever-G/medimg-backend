@@ -9,7 +9,7 @@ from app.db import init_db
 
 
 # 路由模块
-from app.routers import health_router, auth_router, datasets_router, samples_router, annotations_router, approvals_router
+from app.routers import health_router, auth_router, datasets_router, samples_router, annotations_router, approvals_router,audit_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -39,3 +39,4 @@ app.include_router(datasets_router.router)
 app.include_router(samples_router.router)
 app.include_router(annotations_router.router)
 app.include_router(approvals_router.router)
+app.include_router(audit_router.router)
